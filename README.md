@@ -43,52 +43,26 @@ A production-grade Neural Collaborative Filtering (NeuMF) recommendation engine 
 
 ## System Architecture
 
-```
-+---------------------------------------------------------------------------------+
-|                        SYSTEM ARCHITECTURE OVERVIEW                             |
-+---------------------------------------------------------------------------------+
-
-+---------------+    +---------------+    +---------------+
-|   Client App  |    |  Mobile App   |    |  Admin Panel  |
-|   (React/JS)  |    |  (iOS/Android)|    |  (Dashboard)  |
-+-------+-------+    +-------+-------+    +-------+-------+
-        |                    |                    |
-        +--------------------+--------------------+
-                             |
-                     +-------v--------+
-                     |   API Gateway  |
-                     |   (FastAPI)    |
-                     |   Port 8000    |
-                     +-------+--------+
-                             |
-         +-------------------+-------------------+
-         |                   |                   |
-+--------v--------+  +------v--------+  +-------v--------+
-| Recommendation  |  |  User Profile |  |   Analytics    |
-|    Engine       |  |   Service     |  |   Service      |
-|                 |  |               |  |                |
-| - Top-K Recs    |  | - Demographics|  | - Trending     |
-| - Filtering     |  | - Fin. Profile|  | - Metrics      |
-| - Similarity    |  | - History     |  | - Coverage     |
-+--------+--------+  +------+--------+  +-------+--------+
-         |                   |                   |
-         +-------------------+-------------------+
-                             |
-                     +-------v--------+
-                     |   NeuMF Model  |
-                     |   (PyTorch)    |
-                     |                |
-                     | GMF + MLP      |
-                     | Fusion Layer   |
-                     +-------+--------+
-                             |
-                 +-----------+-----------+
-                 |           |           |
-         +-------v---+ +----v----+ +----v------+
-         |  User     | | Product | |Interaction|
-         |  Profiles | | Catalog | |  History  |
-         |  (10K)    | |  (500)  | |  (100K+)  |
-         +-----------+ +---------+ +-----------+
+```mermaid
+flowchart TD
+    subgraph CLIENTS[Clients]
+        C1[Client App<br/>React/JS]
+        C2[Mobile App<br/>iOS/Android]
+        C3[Admin Panel<br/>Dashboard]
+    end
+    GW[API Gateway<br/>FastAPI Port 8000]
+    C1 --> GW
+    C2 --> GW
+    C3 --> GW
+    GW --> REC[Recommendation Engine<br/>Top-K, Filtering, Similarity]
+    GW --> USR[User Profile Service<br/>Demographics, Fin. Profile, History]
+    GW --> ANL[Analytics Service<br/>Trending, Metrics, Coverage]
+    REC --> MOD[NeuMF Model PyTorch<br/>GMF + MLP Fusion Layer]
+    USR --> MOD
+    ANL --> MOD
+    MOD --> UP[(User Profiles<br/>10K)]
+    MOD --> PC[(Product Catalog<br/>500)]
+    MOD --> IH[(Interaction History<br/>100K+)]
 ```
 
 ---
@@ -97,118 +71,53 @@ A production-grade Neural Collaborative Filtering (NeuMF) recommendation engine 
 
 The system implements Neural Collaborative Filtering (NeuMF) as described by He et al. (WWW 2017), combining two complementary pathways:
 
-```
-+------------------------------------------------------------------+
-|                    NeuMF MODEL ARCHITECTURE                       |
-+------------------------------------------------------------------+
-
-            User ID                          Product ID
-               |                                |
-       +-------+-------+                +-------+-------+
-       |               |                |               |
-  +----v----+    +-----v----+     +-----v----+   +-----v----+
-  |GMF User |    |MLP User  |     |GMF Prod  |   |MLP Prod  |
-  |Embedding|    |Embedding |     |Embedding |   |Embedding |
-  | (64-d)  |    | (64-d)   |     | (64-d)   |   | (64-d)   |
-  +----+----+    +-----+----+     +-----+----+   +-----+----+
-       |               |                |               |
-       |               +------+--------+                |
-       |                      |                         |
-  +----v-----------+   +------v------+                  |
-  |  Element-wise  |   | Concatenate |<-----------------+
-  |   Product      |   |  (128-d)    |
-  |   (64-d)       |   +------+------+
-  +----+-----------+          |
-       |              +-------v-------+
-       |              |  Dense (256)  |
-       |              |  BatchNorm    |
-       |              |  ReLU+Dropout |
-       |              +-------+-------+
-       |              +-------v-------+
-       |              |  Dense (128)  |
-       |              |  BatchNorm    |
-       |              |  ReLU+Dropout |
-       |              +-------+-------+
-       |              +-------v-------+
-       |              |  Dense (64)   |
-       |              |  BatchNorm    |
-       |              |  ReLU+Dropout |
-       |              +-------+-------+
-       |              +-------v-------+
-       |              |  Dense (32)   |
-       |              |  BatchNorm    |
-       |              |  ReLU+Dropout |
-       |              +-------+-------+
-       |                      |
-  +----v----------------------v----+
-  |     Concatenate (64+32=96)     |
-  +--------------+-----------------+
-                 |
-         +-------v-------+
-         |  Dense (48)   |
-         |  ReLU+Dropout |
-         +-------+-------+
-         +-------v-------+
-         |  Dense (1)    |
-         |   Sigmoid     |
-         +-------+-------+
-                 |
-                 v
-        Prediction [0, 1]
-     (User-Product Affinity)
+```mermaid
+flowchart TD
+    UID[User ID] --> GMFU[GMF User Embedding 64-d]
+    UID --> MLPU[MLP User Embedding 64-d]
+    PID[Product ID] --> GMFP[GMF Product Embedding 64-d]
+    PID --> MLPP[MLP Product Embedding 64-d]
+    GMFU --> EWP[Element-wise Product 64-d]
+    GMFP --> EWP
+    MLPU --> CONC[Concatenate 128-d]
+    MLPP --> CONC
+    CONC --> D1[Dense 256<br/>BatchNorm + ReLU + Dropout]
+    D1 --> D2[Dense 128<br/>BatchNorm + ReLU + Dropout]
+    D2 --> D3[Dense 64<br/>BatchNorm + ReLU + Dropout]
+    D3 --> D4[Dense 32<br/>BatchNorm + ReLU + Dropout]
+    EWP --> FUSE[Concatenate 64 + 32 = 96]
+    D4 --> FUSE
+    FUSE --> D5[Dense 48<br/>ReLU + Dropout]
+    D5 --> D6[Dense 1<br/>Sigmoid]
+    D6 --> OUT[Prediction 0,1<br/>User-Product Affinity]
 ```
 
 ### Training Pipeline
 
-```
-+------------------------------------------------------------------+
-|                      TRAINING PIPELINE                            |
-+------------------------------------------------------------------+
-
-  +---------+    +----------+    +----------+    +-------------+
-  | Generate |--->|Preprocess|--->| Negative |--->| Train/Val/  |
-  |Synthetic |    |& Encode  |    | Sampling |    | Test Split  |
-  |  Data    |    |          |    | (4:1)    |    |(80/10/10)   |
-  +---------+    +----------+    +----------+    +------+------+
-                                                        |
-  +---------+    +----------+    +----------+    +------v------+
-  |  Save   |<---|  Early   |<---|  Adam +  |<---|  NeuMF     |
-  |  Best   |    | Stopping |    | LR Sched |    |  Forward   |
-  |  Model  |    |(patience)|    | + Clip   |    |  + BCE     |
-  +---------+    +----------+    +----------+    +-------------+
+```mermaid
+flowchart LR
+    A[Generate Synthetic Data] --> B[Preprocess & Encode]
+    B --> C[Negative Sampling 4:1]
+    C --> D[Train/Val/Test Split<br/>80/10/10]
+    D --> E[NeuMF Forward + BCE]
+    E --> F[Adam + LR Sched + Grad Clip]
+    F --> G[Early Stopping<br/>patience]
+    G --> H[Save Best Model]
 ```
 
 ### Recommendation Flow
 
-```
-+------------------------------------------------------------------+
-|                    RECOMMENDATION FLOW                             |
-+------------------------------------------------------------------+
-
-  User Request --> Filter Candidates --> Score via NeuMF
-       |                |                     |
-       |          +-----+------+              |
-       |          | Exclude    |              |
-       |          | Owned      |         +----v-----+
-       |          | Category   |         | CF Score |
-       |          | Risk Level |         | (0.85)   |
-       |          +------------+         +----+-----+
-       |                                      |
-       |                                +-----v------+
-       |                                | Popularity |
-       |                                |  Score     |
-       |                                |  (0.15)    |
-       |                                +-----+------+
-       |                                      |
-       |                                +-----v------+
-       +--------------------------------|  Blend &   |
-                                        |  Rank      |
-                                        |  Top-K     |
-                                        +-----+------+
-                                              |
-                                              v
-                                        Recommendations
-                                     (with confidence scores)
+```mermaid
+flowchart TD
+    A[User Request] --> B[Filter Candidates]
+    B --> CAT[Exclude Owned<br/>Category, Risk Level]
+    B --> SCO[Score via NeuMF]
+    SCO --> CF[CF Score 0.85]
+    SCO --> POP[Popularity Score 0.15]
+    CF --> RANK[Blend & Rank Top-K]
+    POP --> RANK
+    CAT --> RANK
+    RANK --> OUT[Recommendations<br/>with confidence scores]
 ```
 
 ---
